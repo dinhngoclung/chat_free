@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "992451732443",
+    "project_id": "chat-free--8783",
+    "storage_bucket": "chat-free--8783.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:992451732443:android:10ab816408089e58857dfe",
+        "android_client_info": {
+          "package_name": "com.example.chat_free"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA4Lxv1UKfibT84ap71hd0RgYXXwvHqvWE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
