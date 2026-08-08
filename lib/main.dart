@@ -25,8 +25,7 @@ const zaloBg = Color(0xFFF0F2F5);
 
 class ChatFreeApp extends StatelessWidget {
   const ChatFreeApp({super.key});
-  @override
-  Widget build(BuildContext context) {
+  @override Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
@@ -53,7 +52,13 @@ class _NameGateState extends State<NameGate> {
     final phone = c.text.trim();
     if (!RegExp(r'^0\d{9}$').hasMatch(phone)) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('SĐT phải 10 số bắt đầu bằng số 0!'))); return; }
     final p = await SharedPreferences.getInstance();
-    await FirebaseFirestore.instance.collection('users').doc(phone).set({'phone': phone, 'friends': [], 'lastSeen': FieldValue.serverTimestamp()}, SetOptions(merge: true));
+    // FIX QUAN TRỌNG: KHÔNG GHI ĐÈ FRIENDS
+    final userDoc = await FirebaseFirestore.instance.collection('users').doc(phone).get();
+    if (!userDoc.exists) {
+      await FirebaseFirestore.instance.collection('users').doc(phone).set({'phone': phone, 'friends': [], 'createdAt': FieldValue.serverTimestamp(), 'lastSeen': FieldValue.serverTimestamp()});
+    } else {
+      await FirebaseFirestore.instance.collection('users').doc(phone).update({'lastSeen': FieldValue.serverTimestamp()});
+    }
     await p.setString('my_phone', phone);
     if (!mounted) return; Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => HomeScreen(myPhone: phone)));
   }
@@ -103,15 +108,26 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       if(k.startsWith('avatar_')) av[k.replaceAll('avatar_', '')] = p.getString(k)??'';
       if(k.startsWith('nickname_')) nick[k.replaceAll('nickname_', '')] = p.getString(k)??'';
     }
+    // FIX: Load thêm từ Firebase để đổi máy vẫn còn
+    try{
+      final doc = await FirebaseFirestore.instance.collection('user_custom').doc(widget.myPhone).get();
+      if(doc.exists){
+        final data = doc.data() as Map;
+        if(data['avatars']!=null) av.addAll(Map<String,String>.from(data['avatars']));
+        if(data['nicknames']!=null) nick.addAll(Map<String,String>.from(data['nicknames']));
+      }
+    }catch(_){}
     setState((){ _avatars = av; _nicknames = nick; });
   }
   Future<void> _pickAvatar(String friendPhone) async {
     final x = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 40);
     if(x==null) return;
     final b = await File(x.path).readAsBytes();
+    final b64 = base64Encode(b);
     final p = await SharedPreferences.getInstance();
-    await p.setString('avatar_$friendPhone', base64Encode(b));
-    setState(()=>_avatars[friendPhone]=base64Encode(b));
+    await p.setString('avatar_$friendPhone', b64);
+    await FirebaseFirestore.instance.collection('user_custom').doc(widget.myPhone).set({'avatars': {friendPhone: b64}}, SetOptions(merge: true));
+    setState(()=>_avatars[friendPhone]=b64);
   }
   Future<void> _editName(String friendPhone) async {
     final c = TextEditingController(text: _nicknames[friendPhone]?? friendPhone);
@@ -121,6 +137,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     if(res==null || res.isEmpty) return;
     final p = await SharedPreferences.getInstance();
     await p.setString('nickname_$friendPhone', res);
+    await FirebaseFirestore.instance.collection('user_custom').doc(widget.myPhone).set({'nicknames': {friendPhone: res}}, SetOptions(merge: true));
     setState(()=>_nicknames[friendPhone]=res);
   }
   void _showEditOptions(String friendPhone){
@@ -131,6 +148,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         ListTile(leading: const Icon(Icons.image, color: zaloBlue), title: const Text('Đổi avatar'), onTap: (){ Navigator.pop(ctx); _pickAvatar(friendPhone); }),
         ListTile(leading: const Icon(Icons.delete, color: Colors.red), title: const Text('Xóa về mặc định', style: TextStyle(color: Colors.red)), onTap: () async {
           final p = await SharedPreferences.getInstance(); await p.remove('nickname_$friendPhone'); await p.remove('avatar_$friendPhone');
+          await FirebaseFirestore.instance.collection('user_custom').doc(widget.myPhone).set({'avatars': {friendPhone: FieldValue.delete()}, 'nicknames': {friendPhone: FieldValue.delete()}}, SetOptions(merge: true));
           setState((){ _nicknames.remove(friendPhone); _avatars.remove(friendPhone); }); Navigator.pop(ctx);
         }),
         const SizedBox(height: 12)
@@ -178,6 +196,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Đã gửi lời mời tới $phone!'))); searchC.clear();
   }
   Future<void> _accept(String fromPhone, String docId) async {
+    // FIX lấy số đằng trước nếu bị dính _
+    fromPhone = fromPhone.split('_').first;
     await FirebaseFirestore.instance.collection('users').doc(widget.myPhone).set({'friends': FieldValue.arrayUnion([fromPhone])}, SetOptions(merge: true));
     await FirebaseFirestore.instance.collection('users').doc(fromPhone).set({'friends': FieldValue.arrayUnion([widget.myPhone])}, SetOptions(merge: true));
     await FirebaseFirestore.instance.collection('friend_requests').doc(docId).update({'status':'accepted'});
@@ -199,7 +219,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           if(snap.data==null || snap.data!.docs.isEmpty) return const SizedBox();
           return Container(color: const Color(0xFFFFF3E0), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             const Padding(padding: EdgeInsets.all(10), child: Text('Lời mời kết bạn', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.orange))),
-          ...snap.data!.docs.map((d){ final data=d.data() as Map; return ListTile(leading: const CircleAvatar(backgroundColor: zaloBlue, child: Icon(Icons.person_add, color: Colors.white)), title: Text(data['from'], style: const TextStyle(fontWeight: FontWeight.bold)), trailing: Row(mainAxisSize: MainAxisSize.min, children: [FilledButton(style: FilledButton.styleFrom(backgroundColor: zaloBlue), onPressed: ()=>_accept(data['from'], d.id), child: const Text('Đồng ý')), IconButton(onPressed: ()=>d.reference.delete(), icon: const Icon(Icons.close))])); })
+         ...snap.data!.docs.map((d){ final data=d.data() as Map; String fromPhone = data['from'].toString().split('_').first; return ListTile(leading: const CircleAvatar(backgroundColor: zaloBlue, child: Icon(Icons.person_add, color: Colors.white)), title: Text(fromPhone, style: const TextStyle(fontWeight: FontWeight.bold)), trailing: Row(mainAxisSize: MainAxisSize.min, children: [FilledButton(style: FilledButton.styleFrom(backgroundColor: zaloBlue), onPressed: ()=>_accept(fromPhone, d.id), child: const Text('Đồng ý')), IconButton(onPressed: ()=>d.reference.delete(), icon: const Icon(Icons.close))])); })
           ]));
         }),
         Expanded(child: TabBarView(controller: _tab, children: [
@@ -209,7 +229,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             if (friends.isEmpty) return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.chat_bubble_outline, size: 60, color: Colors.grey[300]), const SizedBox(height: 8), const Text('Chưa có bạn bè', style: TextStyle(color: Colors.grey))]));
             _setupListeners(friends);
             return ListView.separated(separatorBuilder: (_,__)=> Divider(height: 1, indent: 76, color: Colors.grey[200]), itemCount: friends.length, itemBuilder: (_, i) {
-              final f = friends[i]; final unread = _hasUnread[f]??false; final last = _lastMsg[f]??''; final avB64 = _avatars[f]; final nick = _nicknames[f]?? f;
+              final f = friends[i].split('_').first; final unread = _hasUnread[f]??false; final last = _lastMsg[f]??''; final avB64 = _avatars[f]; final nick = _nicknames[f]?? f;
               return ListTile(
                 contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 onLongPress: ()=>_showEditOptions(f),
@@ -288,9 +308,12 @@ class _ChatScreenState extends State<ChatScreen> {
   void _openFullImage(String base64Img){ Navigator.push(context, MaterialPageRoute(builder: (_) => FullImageScreen(base64Img: base64Img))); }
   Future<void> _call() async { final url=Uri.parse('https://meet.jit.si/$chatId'); if(await canLaunchUrl(url)) await launchUrl(url, mode: LaunchMode.externalApplication); }
   @override void dispose(){ _scroll.dispose(); _text.dispose(); _player.dispose(); super.dispose(); }
+
   @override Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: zaloBg,
+      // FIX QUAN TRỌNG: Cho bàn phím đẩy lên
+      resizeToAvoidBottomInset: true,
       appBar: AppBar(
         backgroundColor: Colors.white, foregroundColor: Colors.black87, elevation: 1,
         titleSpacing: 0,
@@ -314,24 +337,29 @@ class _ChatScreenState extends State<ChatScreen> {
               return ZaloBubble(isMe: isMe, text: txt, isEmojiOnly: _isOnlyEmoji(txt), time: time);
             });
           })),
-          // FIX LỖI Ở ĐÂY - ĐÃ BỎ bgColor
+          // FIX THANH NHẮN TIN BAY CAO
           if(_showEmoji) SizedBox(height: 260, child: EmojiPicker(textEditingController: _text, config: const Config(emojiViewConfig: EmojiViewConfig(columns: 8, backgroundColor: Colors.white), bottomActionBarConfig: BottomActionBarConfig(backgroundColor: Colors.white)))),
           if(_showSticker) Container(height: 100, color: Colors.white, child: ListView.builder(scrollDirection: Axis.horizontal, itemCount: assetStickers.length, itemBuilder: (_, i){ return InkWell(onTap: ()=>_send(assetPath: assetStickers[i]), child: Padding(padding: const EdgeInsets.all(10), child: Image.asset(assetStickers[i], width: 70, height: 70, errorBuilder: (_,__,___)=>Container(width:70,height:70,color: Colors.grey[200], child: const Icon(Icons.emoji_emotions))))); })),
-          Container(
-            color: Colors.white,
-            padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-            child: SafeArea(child: Row(children: [
-              IconButton(onPressed: ()=>setState((){_showEmoji=!_showEmoji; _showSticker=false;}), icon: Icon(_showEmoji? Icons.keyboard : Icons.emoji_emotions_outlined, color: Colors.grey[600])),
-              IconButton(onPressed: ()=>setState((){_showSticker=!_showSticker; _showEmoji=false;}), icon: Icon(Icons.gif_box, color: _showSticker? zaloBlue : Colors.grey[600])),
-              IconButton(onPressed: _pick, icon: Icon(Icons.image, color: Colors.grey[600])),
-              Expanded(child: Container(margin: const EdgeInsets.symmetric(vertical: 6), decoration: BoxDecoration(color: zaloBg, borderRadius: BorderRadius.circular(20)), child: TextField(controller: _text, minLines: 1, maxLines: 4, onTap: ()=>setState((){_showEmoji=false; _showSticker=false;}), decoration: const InputDecoration(hintText: 'Tin nhắn', border: InputBorder.none, contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 10))))),
-              const SizedBox(width: 4),
-              GestureDetector(onTap: ()=>_send(), child: Container(margin: const EdgeInsets.all(6), padding: const EdgeInsets.all(10), decoration: const BoxDecoration(color: zaloBlue, shape: BoxShape.circle), child: const Icon(Icons.send, color: Colors.white, size: 20))),
-              const SizedBox(width: 4),
-            ])),
-          )
         ]),
       ]),
+      // FIX QUAN TRỌNG: Đưa thanh nhập ra bottomNavigationBar để nó sát bàn phím
+      bottomNavigationBar: SafeArea(
+        child: Padding(
+          padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+          child: Container(
+            color: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+            child: Row(children: [
+              IconButton(onPressed: ()=>setState((){_showEmoji=!_showEmoji; _showSticker=false; if(_showEmoji) FocusScope.of(context).unfocus();}), icon: Icon(_showEmoji? Icons.keyboard : Icons.emoji_emotions_outlined, color: Colors.grey[600])),
+              IconButton(onPressed: ()=>setState((){_showSticker=!_showSticker; _showEmoji=false; if(_showSticker) FocusScope.of(context).unfocus();}), icon: Icon(Icons.gif_box, color: _showSticker? zaloBlue : Colors.grey[600])),
+              IconButton(onPressed: _pick, icon: Icon(Icons.image, color: Colors.grey[600])),
+              Expanded(child: Container(decoration: BoxDecoration(color: zaloBg, borderRadius: BorderRadius.circular(20)), child: TextField(controller: _text, minLines: 1, maxLines: 4, onTap: ()=>setState((){_showEmoji=false; _showSticker=false;}), decoration: const InputDecoration(hintText: 'Tin nhắn', border: InputBorder.none, contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 10))))),
+              const SizedBox(width: 4),
+              GestureDetector(onTap: ()=>_send(), child: Container(padding: const EdgeInsets.all(10), decoration: const BoxDecoration(color: zaloBlue, shape: BoxShape.circle), child: const Icon(Icons.send, color: Colors.white, size: 20))),
+            ]),
+          ),
+        ),
+      ),
     );
   }
 }
