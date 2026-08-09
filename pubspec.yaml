@@ -11,26 +11,16 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.8
-  
-  # Firebase - DÙNG BỘ 4.x + 13.x MỚI NHẤT - ĐỒNG BỘ
   firebase_core: ^4.13.0
   cloud_firestore: ^6.8.0
-  firebase_auth: ^6.5.7
-  firebase_storage: ^13.4.6
-
-  # Chat Core
   cached_network_image: ^3.4.1
   intl: ^0.20.2
   uuid: ^4.5.1
-  timeago: ^3.7.0
-  
-  # Picker & Media
   image_picker: ^1.0.7
+  flutter_image_compress: ^1.1.3
   gal: ^2.3.0
   path_provider: ^2.1.1
   audioplayers: ^6.0.0
-  
-  # UI Zalo
   emoji_picker_flutter: ^4.5.3
   shared_preferences: ^2.5.5
   url_launcher: ^6.2.4
@@ -39,18 +29,8 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
-  flutter_launcher_icons: ^0.14.0
 
 flutter:
   uses-material-design: true
   assets:
     - assets/sounds/ting.mp3
-    - assets/stickers/
-    - assets/wallpapers/
-    - assets/icon/chatfree.png
-
-flutter_launcher_icons:
-  android: "launcher_icon"
-  ios: true
-  image_path: "assets/icon/chatfree.png"
-  min_sdk_android: 21
